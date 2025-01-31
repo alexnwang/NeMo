@@ -45,6 +45,8 @@ class MockDataModule(pl.LightningDataModule):
         pin_memory: bool = True,
         persistent_workers: bool = False,
         create_attention_mask: bool = False,
+        vocab_file: Optional[str] = None,
+        merges_file: Optional[str] = None,
     ):
         super().__init__()
         self.seq_length = seq_length
@@ -61,7 +63,9 @@ class MockDataModule(pl.LightningDataModule):
         if tokenizer is None:
             from nemo.collections.nlp.modules.common.tokenizer_utils import get_nmt_tokenizer
 
-            self.tokenizer = get_nmt_tokenizer("megatron", "GPT2BPETokenizer")
+            self.tokenizer = get_nmt_tokenizer(
+                "megatron", "GPT2BPETokenizer", vocab_file=vocab_file, merges_file=merges_file
+            )
         else:
             self.tokenizer = tokenizer
 
@@ -98,6 +102,11 @@ class MockDataModule(pl.LightningDataModule):
             self.setup()
         return self._create_dataloader(self._test_ds)
 
+    def predict_dataloader(self) -> EVAL_DATALOADERS:
+        if not hasattr(self, "_predict_ds"):
+            self.setup()
+        return self._create_dataloader(self._predict_ds)
+
     def _create_dataloader(self, dataset, **kwargs) -> DataLoader:
         return DataLoader(
             dataset,
@@ -133,6 +142,7 @@ class _MockGPTDataset(Dataset):
 
         self.loss_mask = torch.ones(self.seq_length, dtype=torch.float)
         self.position_ids = torch.arange(self.seq_length, dtype=torch.int64)
+        self.data_batches = data_batches
 
     def __len__(self) -> int:
         return self.length
@@ -152,6 +162,7 @@ class _MockGPTDataset(Dataset):
             "labels": labels,
             "loss_mask": self.loss_mask,
             "position_ids": self.position_ids,
+            'a': tokens,
         }
 
         if self.create_attention_mask:

@@ -588,8 +588,6 @@ class MegatronParallel(nn.ModuleList, Generic[ModelT]):
                     module.config,
                     self.ddp_config,
                     module,
-                    data_parallel_group=parallel_state.get_data_parallel_group(with_context_parallel=True),
-                    expert_data_parallel_group=parallel_state.get_data_modulo_expert_parallel_group(),
                     disable_bucketing=disable_bucketing,
                 )
 
@@ -1712,9 +1710,8 @@ def masked_token_loss(tensor: Tensor, mask: Tensor):
     The function takes as input per-token loss and masks non-required values.
     """
     losses = tensor.float()
-    loss_mask = mask.view(-1).float()
+    loss_mask = mask.view(-1).float().cuda()
     loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()  # sequence level nll
-
     return loss
 
 
@@ -1725,7 +1722,7 @@ def masked_token_loss_context_parallel(tensor: Tensor, mask: Tensor, num_valid_t
     from megatron.core import parallel_state
 
     losses = tensor.float()
-    loss_mask = mask.view(-1).float()
+    loss_mask = mask.view(-1).float().cuda()
     loss = torch.sum(losses.view(-1) * loss_mask) / num_valid_tokens_in_ub  # sequence level nll
     torch.distributed.all_reduce(loss, group=parallel_state.get_context_parallel_group())
 

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import inspect
 import json
 from pathlib import Path
@@ -25,9 +24,6 @@ from megatron.core.inference.common_inference_params import CommonInferenceParam
 from megatron.core.inference.engines.mcore_engine import MCoreEngine
 from megatron.core.inference.model_inference_wrappers.abstract_model_inference_wrapper import (
     AbstractModelInferenceWrapper,
-)
-from megatron.core.inference.text_generation_controllers.encoder_decoder_text_generation_controller import (
-    EncoderDecoderTextGenerationController,
 )
 from megatron.core.inference.text_generation_controllers.simple_text_generation_controller import (
     SimpleTextGenerationController,
@@ -165,7 +161,7 @@ def _setup_trainer_and_restore_model(path: Path, trainer: nl.Trainer, model: pl.
     trainer.strategy.trainer = trainer
     trainer.strategy.selective_restore()
 
-    peft: Union[io.TrainerContext, PEFT] = io.load_context(ckpt_to_context_subdir(path), "model.model_transform")
+    peft: Union[io.TrainerContext, PEFT] = model.model_transform
     if isinstance(peft, PEFT):
         model = peft(model)
         adapter_sharded_state_dict = {k: v for k, v in model.sharded_state_dict().items() if ".adapter." in k}
@@ -236,6 +232,10 @@ def generate(
     Returns:
         dict: A dictionary containing the generated results.
     """
+    from megatron.core.inference.text_generation_controllers.encoder_decoder_text_generation_controller import (
+        EncoderDecoderTextGenerationController,
+    )
+
     if encoder_prompts is not None:
         text_generation_controller = EncoderDecoderTextGenerationController(
             inference_wrapped_model=model, tokenizer=tokenizer
