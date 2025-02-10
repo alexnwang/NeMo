@@ -674,6 +674,7 @@ class DiTCrossAttentionModel7B(VisionModule):
         position_embedding_type: Literal["learned_absolute", "rope"] = "rope",
         rotary_percent: float = 1.0,
         seq_len_interpolation_factor: Optional[float] = None,
+        in_channels=16
     ):
 
         super(DiTCrossAttentionModel7B, self).__init__(config=config)
@@ -715,7 +716,7 @@ class DiTCrossAttentionModel7B(VisionModule):
         )
 
         if self.pre_process:
-            self.in_channels = 16
+            self.in_channels = in_channels
             self.in_channels = self.in_channels + 1 if self.concat_padding_mask else self.in_channels
             self.legacy_patch_emb = False
             self.x_embedder = PatchEmbed(

@@ -245,6 +245,24 @@ class ReMapkey(AbstractEmbModel):
     def details(self) -> str:
         key = self.output_key if self.output_key else self.input_key
         return f"Output key: {key} \n\tDtype: {self.dtype}"
+    
+class BooleanFlag(AbstractEmbModel):
+    def __init__(self, output_key: Optional[str] = None):
+        super().__init__()
+        self.output_key = output_key
+
+    def forward(self, *args, **kwargs) -> Dict[str, torch.Tensor]:
+        del args, kwargs
+        key = self.output_key if self.output_key else self.input_key
+        return {key: self.flag}
+
+    def random_dropout_input(
+        self, in_tensor: torch.Tensor, dropout_rate: Optional[float] = None, key: Optional[str] = None
+    ) -> torch.Tensor:
+        del key
+        dropout_rate = dropout_rate if dropout_rate is not None else self.dropout_rate
+        self.flag = torch.bernoulli((1.0 - dropout_rate) * torch.ones(1)).bool().to(device=in_tensor.device)
+        return in_tensor
 
 
 class ScalarEmb(AbstractEmbModel):
@@ -611,6 +629,18 @@ class BaseVideoCondition:
 
     def to_dict(self) -> Dict[str, Optional[torch.Tensor]]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
+    
+@dataclass
+class VideoExtendCondition(BaseVideoCondition):
+    video_cond_bool: Optional[torch.Tensor] = None  # whether or not it conditioned on video
+    gt_latent: Optional[torch.Tensor] = None
+    condition_video_indicator: Optional[torch.Tensor] = None  # 1 for condition region
+
+    # condition_video_input_mask will concat to the input of network, along channel dim;
+    # Will be concat with the input tensor
+    condition_video_input_mask: Optional[torch.Tensor] = None
+    # condition_video_augment_sigma: (B, T) tensor of sigma value for the conditional input augmentation, only valid when apply_corruption_to_condition_region is "noise_with_sigma" or "noise_with_sigma_fixed"
+    condition_video_augment_sigma: Optional[torch.Tensor] = None
 
 
 class VideoConditioner(GeneralConditioner):
@@ -621,3 +651,12 @@ class VideoConditioner(GeneralConditioner):
     ) -> BaseVideoCondition:
         output = super()._forward(batch, override_dropout_rate)
         return BaseVideoCondition(**output)
+    
+class VideoExtendConditioner(GeneralConditioner):
+    def forward(
+        self,
+        batch: Dict,
+        override_dropout_rate: Optional[Dict[str, float]] = None,
+    ) -> VideoExtendCondition:
+        output = super()._forward(batch, override_dropout_rate)
+        return VideoExtendCondition(**output)

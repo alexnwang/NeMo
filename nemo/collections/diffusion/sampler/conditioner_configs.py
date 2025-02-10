@@ -4,7 +4,7 @@ from typing import Any, List
 
 import attrs
 
-from nemo.collections.diffusion.sampler.conditioner import ReMapkey, TextAttr, VideoConditioner
+from nemo.collections.diffusion.sampler.conditioner import ReMapkey, TextAttr, VideoConditioner, BooleanFlag
 
 
 @attrs.define(slots=False)
@@ -56,6 +56,16 @@ class NumFramesConfig:
     obj: Any = ReMapkey(output_key="num_frames", dtype=None)
     dropout_rate: float = 0.0
     input_key: str = "num_frames"
+
+@attrs.define(slots=False)
+class VideoCondBoolConfig:
+    obj: Any = BooleanFlag(output_key="video_cond_bool")
+    dropout_rate: float = 0.2
+    input_key: str = "fps"  # This is a placeholder, we never use this value
+    # Config below are for long video generation only
+
+    # Sample PPP... from IPPP... sequence
+    sample_tokens_start_from_p_or_i: bool = False
 
 
 BaseVideoConditionerConfig: Any = VideoConditioner(

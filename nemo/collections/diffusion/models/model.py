@@ -46,6 +46,7 @@ from nemo.lightning.pytorch.optim import OptimizerModule
 
 from .dit.dit_model import DiTCrossAttentionModel
 from .dit.dit_model_7b import DiTCrossAttentionModel7B
+from .dit.dit_model_7b_extend import DiTCrossAttentionModel7BExtend
 from .dit.dit_model_14b import DiTCrossAttentionModel14B
 
 
@@ -180,6 +181,15 @@ class DiTConfig(TransformerConfig, io.IOMixin):
                 pre_process=parallel_state.is_pipeline_first_stage(),
                 post_process=parallel_state.is_pipeline_last_stage(),
             )
+        elif isinstance(self, DiT7BExtendConfig):
+            model = DiTCrossAttentionModel7BExtend
+            return model(
+                self,
+                fp16_lm_cross_entropy=self.fp16_lm_cross_entropy,
+                parallel_output=self.parallel_output,
+                pre_process=parallel_state.is_pipeline_first_stage(),
+                post_process=parallel_state.is_pipeline_last_stage(),
+            )
         elif isinstance(self, DiT7BConfig):
             model = DiTCrossAttentionModel7B
             return model(
@@ -260,6 +270,10 @@ class DiT7BConfig(DiTConfig):
     data_step_fn = dit_data_step
     forward_step_fn = dit_forward_step
     model_name = 'cosmos_7b_text2world'
+    
+@dataclass
+class DiT7BExtendConfig(DiT7BConfig):
+    model_name = 'cosmos_7b_video2world'
 
 @dataclass
 class DiT14BConfig(DiTConfig):
@@ -338,13 +352,29 @@ class DiTModel(GPTModel):
         tokenizer: Optional[Any] = None,
     ):
         super().__init__(config or DiTConfig(), optim=optim, model_transform=model_transform)
-
         self.vae = None
 
         self._training_loss_reduction = None
         self._validation_loss_reduction = None
         if hasattr(config, 'model_name'):
-            if 'cosmos' in getattr(config, 'model_name'):
+            if getattr(config, 'model_name') == 'cosmos_7b_video2world':
+                from nemo.collections.diffusion.sampler.conditioner import VideoExtendConditioner
+                from nemo.collections.diffusion.sampler.conditioner_configs import VideoCondBoolConfig
+                self.conditioner = VideoExtendConditioner(
+                    text=TextConfig(),
+                    fps=FPSConfig(),
+                    num_frames=NumFramesConfig(),
+                    image_size=ImageSizeConfig(),
+                    padding_mask=PaddingMaskConfig(),
+                    video_cond_bool=VideoCondBoolConfig(),
+                )
+                from nemo.collections.diffusion.sampler.cosmos.cosmos_diffusion_v2w_pipeline import CosmosDiffusionV2WPipeline
+                self.diffusion_pipeline = CosmosDiffusionV2WPipeline(
+                    net=self,
+                    conditioner=self.conditioner,
+                    loss_add_logvar=self.config.loss_add_logvar,
+                )
+            elif 'cosmos' in getattr(config, 'model_name'):
                 self.conditioner = VideoConditioner(
                                 text=TextConfig(),
                                 fps=FPSConfig(),
