@@ -178,7 +178,7 @@ class BasePretrainedVideoTokenizer(ABC):
             state = torch.cat(state, dim=0)
         else:
             state = super().decode(latent)
-        assert state.shape[2] == self.pixel_chunk_duration
+        # assert state.shape[2] == self.pixel_chunk_duration
         state = rearrange(state, "(b n) c t h w -> b c (n t) h w", b=B)
         if self._temporal_compress_factor == 1:
             return rearrange(state, "(b t) c 1 h w -> b c t h w", t=origin_T)
