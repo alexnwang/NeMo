@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import importlib
+import os
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -447,6 +448,12 @@ class DiTModel(GPTModel):
 
     def validation_step(self, batch, batch_idx=None) -> torch.Tensor:
         app_state = AppState()
+        video_save_dir = f"{app_state._log_dir}/saves"
+        if not os.path.exists(video_save_dir):
+            os.makedirs(video_save_dir)
+            
+        del batch['timesteps']  # HACK make sure this isn't used anywhere
+        
         # In mcore the loss-function is part of the forward-pass (when labels are provided)
         state_shape = batch['video'].shape
         sample = self.diffusion_pipeline.generate_samples_from_batch(
@@ -459,6 +466,7 @@ class DiTModel(GPTModel):
         )
 
         b,c,t,h,w = state_shape
+        # HACK for padding up to T=16, however, not necessary it seems
         # vae_length = 16
         # if t < vae_length:
         #     # pad sample to the same length as the vae
@@ -481,7 +489,7 @@ class DiTModel(GPTModel):
                 H=int(batch['image_size'][0, 0, 0]),
                 W=int(batch['image_size'][0, 0, 1]),
                 video_save_quality=5,
-                video_save_path=f"{app_state._log_dir}/{self.global_step}-{self._validation_step_count}.mp4",
+                video_save_path=f"{video_save_dir}/{self.global_step}-{self._validation_step_count}.mp4",
             )
         self._validation_step_count += 1
         # T = video.shape[2]
