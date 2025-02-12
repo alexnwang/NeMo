@@ -73,7 +73,6 @@ class VideoFolderDataset(Dataset):
         
         # Load video latent
         video_latent = torch.load(os.path.join(self.root_dir, f"{prefix}.video_latent.pth"))
-        video_latent = video_latent[:, :10, ...]
         
         t = info['num_frames']
         h = info['height']

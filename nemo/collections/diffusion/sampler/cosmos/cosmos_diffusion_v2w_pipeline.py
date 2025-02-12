@@ -366,6 +366,7 @@ class CosmosDiffusionV2WPipeline(CosmosDiffusionPipeline):
         condition_video_augment_sigma_in_inference: float = None,
         add_input_frames_guidance: bool = False,
         seed: int = 1,
+        is_sample=True, # if this function is called, it's likely inference
     ) -> Callable:
         """Creates denoising function for conditional video generation.
 
@@ -386,15 +387,22 @@ class CosmosDiffusionV2WPipeline(CosmosDiffusionPipeline):
             condition, uncondition = self.conditioner.get_condition_with_negative_prompt(data_batch)
         else:
             condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)
-
+        condition.data_type=DataType.VIDEO
+        uncondition.data_type=DataType.VIDEO
+        
+        # create condition_video_indicator 
+        B, C, T, H, W = condition_latent.shape
+        condition_video_indicator = torch.zeros(B, 1, T, 1, 1, **self.tensor_kwargs)
+        condition_video_indicator[:, :, :num_condition_t] += 1.
+        
         condition.video_cond_bool = True
         condition = self.add_condition_video_indicator_and_video_input_mask(
-            condition_latent, condition, num_condition_t
+            condition_latent, condition, condition_video_indicator=condition_video_indicator
         )
 
         uncondition.video_cond_bool = False if add_input_frames_guidance else True
         uncondition = self.add_condition_video_indicator_and_video_input_mask(
-            condition_latent, uncondition, num_condition_t
+            condition_latent, uncondition, condition_video_indicator=condition_video_indicator
         )
 
         def x0_fn(noise_x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
@@ -404,16 +412,16 @@ class CosmosDiffusionV2WPipeline(CosmosDiffusionPipeline):
                 condition,
                 condition_video_augment_sigma_in_inference=condition_video_augment_sigma_in_inference,
                 seed=seed,
-                is_sample=True
-            ).x0_pred_replaced
+                is_sample=is_sample
+            )[0]
             uncond_x0 = self.denoise(
                 noise_x,
                 sigma,
                 uncondition,
                 condition_video_augment_sigma_in_inference=condition_video_augment_sigma_in_inference,
                 seed=seed,
-                is_sample=True
-            ).x0_pred_replaced
+                is_sample=is_sample
+            )[0]
 
             return cond_x0 + guidance * (cond_x0 - uncond_x0)
 
@@ -433,27 +441,43 @@ class CosmosDiffusionV2WPipeline(CosmosDiffusionPipeline):
         """
         Generate samples from the batch. Based on given batch, it will automatically determine whether to generate image or video samples.
         """
-
+        B, C, T, H, W = state_shape
+        num_condition_t = 1
+        video_latent = data_batch['video'] # B, C, T, H, W
+        condition_latent = torch.cat((
+            video_latent[:, :, :num_condition_t],
+            torch.zeros(B, C, T-num_condition_t, H, W, device=video_latent.device, dtype=video_latent.dtype)
+        ), dim=2).contiguous()
+        
+        default_augment_sigma = 0.001
         is_image_batch = self.is_image_batch(data_batch)
+        assert not is_image_batch, "this method is only for video data" #HACK from alex to guarantee
+        
         if n_sample is None:
             input_key = self.input_image_key if is_image_batch else self.input_data_key
             n_sample = data_batch[input_key].shape[0]
-        if state_shape is None:
-            if is_image_batch:
-                state_shape = (self.state_shape[0], 1, *self.state_shape[2:])  # C,T,H,W
+        assert state_shape is not None, "state_shape should be provided"
 
         cp_enabled = parallel_state.get_context_parallel_world_size() > 1
 
         if self._noise_generator is None:
             self._initialize_generators()
 
-        x0_fn = self.get_x0_fn_from_batch_with_condition_latent(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+        x0_fn = self.get_x0_fn_from_batch_with_condition_latent(
+            data_batch,
+            guidance,
+            is_negative_prompt=is_negative_prompt,
+            condition_latent=condition_latent,
+            num_condition_t=num_condition_t,
+            condition_video_augment_sigma_in_inference=default_augment_sigma,
+            add_input_frames_guidance=False,
+            is_sample=True)
         
         state_shape = list(state_shape)
         
         np.random.seed(self.seed)
         x_sigma_max = (
-            torch.from_numpy(np.random.randn(1, *state_shape).astype(np.float32)).to(
+            torch.from_numpy(np.random.randn(*state_shape).astype(np.float32)).to(
                 dtype=torch.float32, device=self.tensor_kwargs["device"]
             )
             * self.sde.sigma_max

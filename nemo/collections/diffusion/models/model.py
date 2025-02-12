@@ -43,6 +43,7 @@ from nemo.collections.llm.gpt.model.base import GPTModel
 from nemo.lightning import io
 from nemo.lightning.megatron_parallel import MaskedTokenLossReduction, MegatronLossReduction
 from nemo.lightning.pytorch.optim import OptimizerModule
+from nemo.utils import AppState
 
 from .dit.dit_model import DiTCrossAttentionModel
 from .dit.dit_model_7b import DiTCrossAttentionModel7B
@@ -357,6 +358,7 @@ class DiTModel(GPTModel):
         self._training_loss_reduction = None
         self._validation_loss_reduction = None
         if hasattr(config, 'model_name'):
+            print(f"Model name: {config.model_name}")
             if getattr(config, 'model_name') == 'cosmos_7b_video2world':
                 from nemo.collections.diffusion.sampler.conditioner import VideoExtendConditioner
                 from nemo.collections.diffusion.sampler.conditioner_configs import VideoCondBoolConfig
@@ -376,17 +378,17 @@ class DiTModel(GPTModel):
                 )
             elif 'cosmos' in getattr(config, 'model_name'):
                 self.conditioner = VideoConditioner(
-                                text=TextConfig(),
-                                fps=FPSConfig(),
-                                num_frames=NumFramesConfig(),
-                                image_size=ImageSizeConfig(),
-                                padding_mask=PaddingMaskConfig(),
-                            )
+                    text=TextConfig(),
+                    fps=FPSConfig(),
+                    num_frames=NumFramesConfig(),
+                    image_size=ImageSizeConfig(),
+                    padding_mask=PaddingMaskConfig(),
+                )
                 self.diffusion_pipeline = CosmosDiffusionPipeline(
-                                            net=self,
-                                            conditioner=self.conditioner,
-                                            loss_add_logvar=self.config.loss_add_logvar,
-                                        )
+                    net=self,
+                    conditioner=self.conditioner,
+                    loss_add_logvar=self.config.loss_add_logvar,
+                )
             
         else:
             self.diffusion_pipeline = EDMPipeline(net=self, sigma_data=self.config.sigma_data)
@@ -425,7 +427,7 @@ class DiTModel(GPTModel):
                 output_tensor = self.diffusion_pipeline.training_step(batch, 0)
                 return output_tensor
             
-    def training_step(self, batch, batch_idx=None) -> torch.Tensor:
+    def training_step(self, batch, batch_idx=None) -> torch.Tensor:        
         # In mcore the loss-function is part of the forward-pass (when labels are provided)
         return self.forward_step(batch)
 
@@ -435,70 +437,80 @@ class DiTModel(GPTModel):
                 warnings.warn('vae_path not specified skipping validation')
                 return None
             self.vae = self.config.configure_vae()
+        self._validation_step_count = 0
         self.vae.to('cuda')
 
     def on_validation_end(self):
         if self.vae is not None:
             self.vae.to('cpu')
+        del self._validation_step_count
 
     def validation_step(self, batch, batch_idx=None) -> torch.Tensor:
+        app_state = AppState()
         # In mcore the loss-function is part of the forward-pass (when labels are provided)
         state_shape = batch['video'].shape
         sample = self.diffusion_pipeline.generate_samples_from_batch(
             batch,
             guidance=7,
             state_shape=state_shape,
-            num_steps=35,
             is_negative_prompt=True if 'neg_t5_text_embeddings' in batch else False,
+            num_steps=35,
+            seed=1
         )
 
-        # TODO visualize more than 1 sample
-        sample = sample[0, None]
-        C, T, H, W = batch['latent_shape'][0]
-        seq_len_q = batch['seq_len_q'][0]
-
-        sample = rearrange(
-            sample[:, :seq_len_q],
-            'B (T H W) (ph pw pt C) -> B C (T pt) (H ph) (W pw)',
-            ph=self.config.patch_spatial,
-            pw=self.config.patch_spatial,
-            C=C,
-            T=T,
-            H=H // self.config.patch_spatial,
-            W=W // self.config.patch_spatial,
-        )
-
+        b,c,t,h,w = state_shape
+        # vae_length = 16
+        # if t < vae_length:
+        #     # pad sample to the same length as the vae
+        #     sample = torch.cat([
+        #         sample,torch.zeros(b, c, vae_length-t, h, w, dtype=sample.dtype, device=sample.device)
+        #     ], dim=2)
+        
         video = (1.0 + self.vae.decode(sample / self.config.sigma_data)).clamp(0, 2) / 2  # [B, 3, T, H, W]
-
-        video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
-
-        T = video.shape[2]
-        if T == 1:
-            image = rearrange(video, 'b c t h w -> (b t h) w c')
-            result = image
-        else:
+        video = video[:, :, :int(batch['num_frames'][0, 0])]
+        # video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
+        
+        # Save the video using torchvision
+        from cosmos1.utils.io import save_video
+        video_tensor = torch.tensor(video)[0].permute(1, 2, 3, 0)  # Convert to (THWC) format
+        video_np = (video_tensor * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
+        if torch.distributed.get_rank() == 0:
+            save_video(
+                video=video_np,
+                fps=int(batch['fps'][0, 0]),
+                H=int(batch['image_size'][0, 0, 0]),
+                W=int(batch['image_size'][0, 0, 1]),
+                video_save_quality=5,
+                video_save_path=f"{app_state._log_dir}/{self.global_step}-{self._validation_step_count}.mp4",
+            )
+        self._validation_step_count += 1
+        # T = video.shape[2]
+        # if T == 1:
+        #     image = rearrange(video, 'b c t h w -> (b t h) w c')
+        #     result = image
+        # else:
             # result = wandb.Video(video, fps=float(batch['fps'])) # (batch, time, channel, height width)
-            result = video
+            # result = video
 
         # wandb is on the last rank for megatron, first rank for nemo
-        wandb_rank = 0
+        # wandb_rank = 0
 
-        if parallel_state.get_data_parallel_src_rank() == wandb_rank:
-            if torch.distributed.get_rank() == wandb_rank:
-                gather_list = [None for _ in range(parallel_state.get_data_parallel_world_size())]
-            else:
-                gather_list = None
-            torch.distributed.gather_object(
-                result, gather_list, wandb_rank, group=parallel_state.get_data_parallel_group()
-            )
-            if gather_list is not None:
-                videos = []
-                for video in gather_list:
-                    if len(video.shape) == 3:
-                        videos.append(wandb.Image(video))
-                    else:
-                        videos.append(wandb.Video(video, fps=30))
-                wandb.log({'prediction': videos}, step=self.global_step)
+        # if parallel_state.get_data_parallel_src_rank() == wandb_rank:
+        #     if torch.distributed.get_rank() == wandb_rank:
+        #         gather_list = [None for _ in range(parallel_state.get_data_parallel_world_size())]
+        #     else:
+        #         gather_list = None
+        #     torch.distributed.gather_object(
+        #         result, gather_list, wandb_rank, group=parallel_state.get_data_parallel_group()
+        #     )
+        #     if gather_list is not None:
+        #         videos = []
+        #         for video in gather_list:
+        #             if len(video.shape) == 3:
+        #                 videos.append(wandb.Image(video))
+        #             else:
+        #                 videos.append(wandb.Video(video, fps=30))
+        #         wandb.log({'prediction': videos}, step=self.global_step)
 
         return None
 
