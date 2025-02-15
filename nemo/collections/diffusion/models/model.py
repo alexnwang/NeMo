@@ -433,6 +433,7 @@ class DiTModel(GPTModel):
         return self.forward_step(batch)
 
     def on_validation_start(self):
+        torch.enable_grad(False)
         if self.vae is None:
             if self.config.vae_path is None:
                 warnings.warn('vae_path not specified skipping validation')
@@ -442,6 +443,7 @@ class DiTModel(GPTModel):
         self.vae.to('cuda')
 
     def on_validation_end(self):
+        torch.enable_grad(True)
         if self.vae is not None:
             self.vae.to('cpu')
         del self._validation_step_count
