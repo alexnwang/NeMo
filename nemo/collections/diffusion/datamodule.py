@@ -105,7 +105,7 @@ class VideoFolderDataset(Dataset):
             "padding_mask": torch.zeros((1, 1, h, w), dtype=torch.bfloat16),
             "loss_mask": loss_mask,
             "gt_latent": conditioning_latent,
-            "num_condition_t": random.randint(1, 4)
+            "num_condition_t": random.randint(1, 1)
         }
         # if self._cache is not None:
         #     self._cache[idx] = sample

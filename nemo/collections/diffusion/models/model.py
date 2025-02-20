@@ -411,7 +411,7 @@ class DiTModel(GPTModel):
                                 image_size=ImageSizeConfig(),
                                 padding_mask=PaddingMaskConfig(),
                                 video_cond_bool=VideoCondBoolConfig(
-                                    condition_location="first_random_n",
+                                    condition_location="first_n",
                                     apply_corruption_to_condition_region="noise_with_sigma",
                                     
                                 ),
