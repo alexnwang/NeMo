@@ -447,7 +447,7 @@ class ExtendedDiffusionPipeline:
         state_shape = list(state_shape)
         np.random.seed(self.seed)
         x_sigma_max = (
-            torch.from_numpy(np.random.randn(1, *state_shape).astype(np.float32)).to(
+            torch.from_numpy(np.random.randn(*state_shape).astype(np.float32)).to(
                 dtype=torch.float32, device=self.tensor_kwargs["device"]
             )
             * self.sde.sigma_max

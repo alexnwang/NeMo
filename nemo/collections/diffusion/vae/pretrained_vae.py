@@ -149,7 +149,8 @@ class BasePretrainedImageVAE(BaseVAE):
         Decode the input latent to state; also handle the dtype conversion, mean and std scaling
         """
         in_dtype = latent.dtype
-        latent = latent * self.latent_std.to(in_dtype) + self.latent_mean.to(in_dtype)
+        t = latent.shape[2]
+        latent = latent * self.latent_std[:, :, :t].to(in_dtype) + self.latent_mean[:, :, :t].to(in_dtype)
         return self.decoder(latent.to(self.dtype)).to(in_dtype)
 
     def reset_dtype(self, *args, **kwargs):
