@@ -80,7 +80,7 @@ class VideoFolderDataset(Dataset):
         if os.path.exists(conditioning_latent_path):
             conditioning_latent = torch.load(conditioning_latent_path, map_location='cpu')
         else:
-            conditioning_latent = None
+            conditioning_latent = video_latent
         
         t = info['num_frames']
         h = info['height']
