@@ -490,53 +490,58 @@ class DiTModel(GPTModel):
             
         del batch['timesteps']  # HACK make sure this isn't used anywhere
         
-        # In mcore the loss-function is part of the forward-pass (when labels are provided)
-        state_shape = batch['video'].shape
-        try:
-            import traceback
-            sample = self.diffusion_pipeline.generate_samples_from_batch(
-            batch,
-            guidance=7,
-            state_shape=state_shape,
-            num_steps=35,
-            is_negative_prompt=True if 'neg_t5_text_embeddings' in batch else False,
-            seed=1,
-            condition_latent=batch['gt_latent'],
-            num_condition_t=1,
-            condition_video_augment_sigma_in_inference=0.001
-            )
-        except Exception as e:
-            print("An error occurred during sample generation:")
-            traceback.print_exc()
-            raise e
-        
-        b,c,t,h,w = state_shape
-        # HACK for padding up to T=16, however, not necessary it seems
-        # vae_length = 16
-        # if t < vae_length:
-        #     # pad sample to the same length as the vae
-        #     sample = torch.cat([
-        #         sample,torch.zeros(b, c, vae_length-t, h, w, dtype=sample.dtype, device=sample.device)
-        #     ], dim=2)
-        
-        video = (1.0 + self.vae.decode(sample / self.config.sigma_data)).clamp(0, 2) / 2  # [B, 3, T, H, W]
-        video = video[:, :, :int(batch['num_frames'][0, 0])]
-        # video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
-        
-        # Save the video using torchvision
-        from cosmos1.utils.io import save_video
+        if self._validation_step_count < 16:
+            # In mcore the loss-function is part of the forward-pass (when labels are provided)
+            state_shape = batch['video'].shape
+            try:
+                import traceback
+                sample = self.diffusion_pipeline.generate_samples_from_batch(
+                batch,
+                guidance=7,
+                state_shape=state_shape,
+                num_steps=35,
+                is_negative_prompt=True if 'neg_t5_text_embeddings' in batch else False,
+                seed=1,
+                condition_latent=batch['gt_latent'],
+                num_condition_t=1,
+                condition_video_augment_sigma_in_inference=0.001
+                )
+            except Exception as e:
+                print("An error occurred during sample generation:")
+                traceback.print_exc()
+                raise e
+            
+            b,c,t,h,w = state_shape
+            # HACK for padding up to T=16, however, not necessary it seems
+            # vae_length = 16
+            # if t < vae_length:
+            #     # pad sample to the same length as the vae
+            #     sample = torch.cat([
+            #         sample,torch.zeros(b, c, vae_length-t, h, w, dtype=sample.dtype, device=sample.device)
+            #     ], dim=2)
+            
+            video = (1.0 + self.vae.decode(sample / self.config.sigma_data)).clamp(0, 2) / 2  # [B, 3, T, H, W]
+            video = video[:, :, :int(batch['num_frames'][0, 0])]
+            # video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
+            
+            # Save the video using torchvision
+            from cosmos1.utils.io import save_video
 
-        video_tensor = torch.tensor(video)[0].permute(1, 2, 3, 0)  # Convert to (THWC) format
-        video_np = (video_tensor * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
-        if torch.distributed.get_rank() == 0:
-            save_video(
-                video=video_np,
-                fps=int(batch['fps'][0, 0]),
-                H=int(batch['image_size'][0, 0, 0]),
-                W=int(batch['image_size'][0, 0, 1]),
-                video_save_quality=5,
-                video_save_path=f"{video_save_dir}/{self.global_step}-{self._validation_step_count}.mp4",
-            )
+            video_tensor = torch.tensor(video)[0].permute(1, 2, 3, 0)  # Convert to (THWC) format
+            video_np = (video_tensor * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
+            if 'narration' in batch:
+                save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-{batch['narration'][0]}.mp4"
+            else:
+                save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}.mp4",
+            if torch.distributed.get_rank() == 0:
+                save_video(
+                    video=video_np,
+                    fps=int(batch['fps'][0, 0]),
+                    H=int(batch['image_size'][0, 0, 0]),
+                    W=int(batch['image_size'][0, 0, 1]),
+                    video_save_quality=5,
+                    video_save_path=save_video_fpath
+                )
         self._validation_step_count += 1
 
         # # TODO visualize more than 1 sample
@@ -587,7 +592,9 @@ class DiTModel(GPTModel):
         #                 videos.append(wandb.Video(video, fps=30))
         #         wandb.log({'prediction': videos}, step=self.global_step)
 
-        return None
+        loss = self.forward_step(batch)
+        self.log('val_loss', loss)
+        return {'loss': loss}
 
     @property
     def training_loss_reduction(self) -> MaskedTokenLossReduction:

@@ -107,6 +107,9 @@ class VideoFolderDataset(Dataset):
             "gt_latent": conditioning_latent,
             "num_condition_t": random.randint(1, 1)
         }
+        
+        if 'narration' in info:
+            sample['narration'] = info['narration']
         # if self._cache is not None:
         #     self._cache[idx] = sample
         return sample
