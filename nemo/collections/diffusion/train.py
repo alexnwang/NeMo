@@ -35,7 +35,7 @@ from nemo.collections.diffusion.models.model import (
     DiTModel,
     DiTXLConfig,
 )
-from nemo.lightning.pytorch.callbacks import ModelCheckpoint, PreemptionCallback
+from nemo.lightning.pytorch.callbacks import ModelCheckpoint, PreemptionCallback, StepTimerCallback
 from nemo.lightning.pytorch.callbacks.model_transform import ModelTransform
 from nemo.lightning.pytorch.strategies.utils import RestoreConfig
 
@@ -115,6 +115,7 @@ def pretrain() -> run.Partial:
                     save_weights_only=True
                 ),
                 run.Config(PreemptionCallback),
+                run.Config(StepTimerCallback),
             ],
         ),
         log=nl.NeMoLogger(wandb=(WandbLogger() if "WANDB_API_KEY" in os.environ else None)),
