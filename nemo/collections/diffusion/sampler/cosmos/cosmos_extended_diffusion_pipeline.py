@@ -153,6 +153,27 @@ class ExtendedDiffusionPipeline:
         )
         return output_batch, kendall_loss
 
+    def validation_step(
+        self, data_batch: dict[str, torch.Tensor], num_steps: int = 10
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        x0_from_data_batch, x0, condition = self.get_data_and_condition(data_batch)
+        # compute sigmas
+        step_indices = torch.arange(num_steps, **self.tensor_kwargs)
+        sigma_max, sigma_min, rho = 80, 0.002, 7 
+        t_steps = (
+            sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))
+        ) ** rho
+            
+        total_loss = 0
+        for sigma in t_steps:
+            _, epsilon = self.draw_training_sigma_and_epsilon(x0.size(), condition)
+            output_batch, kendall_loss, pred_mse, edm_loss = self.compute_loss_with_epsilon_and_sigma(
+            data_batch, x0_from_data_batch, x0, condition, epsilon, torch.tensor([sigma], **self.tensor_kwargs)
+            )
+            total_loss = kendall_loss + total_loss
+
+        return total_loss / len(t_steps)
+
     def denoise(
         self,
         xt: torch.Tensor,

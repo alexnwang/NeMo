@@ -442,8 +442,8 @@ class DiTModel(GPTModel):
                 data_batch["is_preprocessed"] = True # assume data is preprocessed
                 if parallel_state.is_pipeline_last_stage():
                     output_batch, kendall_loss = self.diffusion_pipeline.training_step(batch, 0)
-                    if torch.distributed.get_rank() == 0 and wandb.run:
-                        wandb.log({k: output_batch[k] for k in ['edm_loss'] if k in output_batch}, step=self.global_step)
+                    # if torch.distributed.get_rank() == 0 and wandb.run:
+                        # wandb.log({k: output_batch[k] for k in ['edm_loss'] if k in output_batch}, step=self.global_step)
                     kendall_loss = torch.mean(kendall_loss, dim=1)
                     return kendall_loss
                 else:
@@ -592,9 +592,11 @@ class DiTModel(GPTModel):
         #                 videos.append(wandb.Video(video, fps=30))
         #         wandb.log({'prediction': videos}, step=self.global_step)
 
-        loss = self.forward_step(batch)
-        self.log('val_loss', loss)
-        return {'loss': loss}
+        # compute the loss of a training step for 10 validation steps to evaluate loss
+        
+        loss = self.diffusion_pipeline.validation_step(batch, num_steps=10)
+        self.log('validation_loss', loss.mean())
+        return {"val_loss": loss}
 
     @property
     def training_loss_reduction(self) -> MaskedTokenLossReduction:
