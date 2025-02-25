@@ -208,12 +208,13 @@ class DiTVideoLatentMockDataset(torch.utils.data.Dataset):
 
 
 class DiTDataModule(MockDataModule):
-    def __init__(self, *args, path='', dataset=VideoFolderDataset, **kwargs):
+    def __init__(self, *args, path='', val_path='', dataset=VideoFolderDataset, **kwargs):
         super().__init__(*args, **kwargs)
         self.path = path
+        self.val_path = val_path if val_path else path
         self.dataset = dataset
 
     def setup(self, stage: str = "") -> None:
         self._train_ds = self.dataset(self.path)
-        self._validation_ds = self.dataset(self.path)
+        self._validation_ds = self.dataset(self.val_path)
         self._test_ds = self.dataset(self.path)
