@@ -146,6 +146,10 @@ class ExtendedDiffusionPipeline:
         """
         # Get the input data to noise and denoise~(image, video) and the corresponding conditioner.
         x0_from_data_batch, x0, condition = self.get_data_and_condition(data_batch)
+        
+        # HACK, override the noise option during training 
+        condition.apply_corruption_to_condition_region = "noise_with_sigma"
+        
         # Sample pertubation noise levels and N(0, 1) noises
         sigma, epsilon = self.draw_training_sigma_and_epsilon(x0.size(), condition)
         output_batch, kendall_loss, pred_mse, edm_loss = self.compute_loss_with_epsilon_and_sigma(

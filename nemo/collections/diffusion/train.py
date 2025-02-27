@@ -110,7 +110,7 @@ def pretrain() -> run.Partial:
                     ModelCheckpoint,
                     monitor='reduced_train_loss',
                     filename='{epoch}-{step}',
-                    every_n_train_steps=6000,
+                    every_n_train_steps=2000,
                     save_top_k=-1,
                     save_weights_only=True
                 ),
