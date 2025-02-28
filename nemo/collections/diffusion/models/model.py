@@ -488,7 +488,7 @@ class DiTModel(GPTModel):
             
         del batch['timesteps']  # HACK make sure this isn't used anywhere
         
-        if self._validation_step_count < 16:
+        if self._validation_step_count % 4 == 0:
             # In mcore the loss-function is part of the forward-pass (when labels are provided)
             state_shape = batch['video'].shape
             try:
@@ -592,7 +592,7 @@ class DiTModel(GPTModel):
 
         # compute the loss of a training step for 10 validation steps to evaluate loss
         
-        loss = self.diffusion_pipeline.validation_step(batch, num_steps=10)
+        loss = self.diffusion_pipeline.validation_step(batch, num_steps=15)
         self.log('validation_loss', loss.mean())
         return {"val_loss": loss}
 
