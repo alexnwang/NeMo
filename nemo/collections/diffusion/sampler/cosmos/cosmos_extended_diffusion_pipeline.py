@@ -608,32 +608,35 @@ class ExtendedDiffusionPipeline:
         """
         T = latent_state.shape[2]
         latent_dtype = latent_state.dtype
-        condition_video_indicator = torch.zeros(1, 1, T, 1, 1, device=latent_state.device).type(
+        condition_video_indicator = torch.zeros(latent_state.shape[0], 1, T, 1, 1, device=latent_state.device).type(
             latent_dtype
         )  # 1 for condition region
         if condition.condition_location == "first_n":
             # Only in inference to decide the condition region
+            if isinstance(num_condition_t, int):
+                num_condition_t = torch.tensor([num_condition_t])
             assert num_condition_t is not None, "num_condition_t should be provided"
-            assert num_condition_t <= T, f"num_condition_t should be less than T, get {num_condition_t}, {T}"
-            condition_video_indicator[:, :, :num_condition_t] += 1.0
+            assert all(num_condition_t <= T), f"num_condition_t should be less than T, get {num_condition_t}, {T}"
+            for i, num_t in enumerate(num_condition_t):
+                condition_video_indicator[i, :, :num_t] += 1.0
         elif condition.condition_location == "first_random_n":
             # Only in training
             num_condition_t_max = condition.first_random_n_num_condition_t_max
             assert (
-                num_condition_t_max <= T
+            num_condition_t_max <= T
             ), f"num_condition_t_max should be less than T, get {num_condition_t_max}, {T}"
             assert num_condition_t_max >= condition.first_random_n_num_condition_t_min
-            num_condition_t = torch.randint(
-                condition.first_random_n_num_condition_t_min,
-                num_condition_t_max + 1,
-                (1,),
-            ).item()
-            condition_video_indicator[:, :, :num_condition_t] += 1.0
-
+            for i in range(latent_state.shape[0]):
+                num_t = torch.randint(
+                    condition.first_random_n_num_condition_t_min,
+                    num_condition_t_max + 1,
+                    (1,),
+                ).item()
+                condition_video_indicator[i, :, :num_t] += 1.0
         elif condition.condition_location == "random":
             # Only in training
             condition_rate = condition.random_conditon_rate
-            flag = torch.ones(1, 1, T, 1, 1, device=latent_state.device).type(latent_dtype) * condition_rate
+            flag = torch.ones(latent_state.shape[0], 1, T, 1, 1, device=latent_state.device).type(latent_dtype) * condition_rate
             condition_video_indicator = torch.bernoulli(flag).type(latent_dtype).to(latent_state.device)
         else:
             raise NotImplementedError(
@@ -704,7 +707,7 @@ class ExtendedDiffusionPipeline:
                 # This is achieved by setting all region as `generation`, i.e. value=0
                 condition.condition_video_indicator = condition.condition_video_indicator * 0
 
-            augment_sigma = torch.tensor([augment_sigma], **self.tensor_kwargs)
+            augment_sigma = torch.tensor([augment_sigma], **self.tensor_kwargs).tile(gt_latent.shape[0])
 
         else:
             raise ValueError(f"does not support {condition.apply_corruption_to_condition_region}")

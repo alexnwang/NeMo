@@ -462,13 +462,21 @@ class VideoPositionEmb(nn.Module):
         """
         With CP, the function assume that the input tensor is already split. It delegates the embedding generation to generate_embeddings function.
         """
-        B_T_H_W_C = x_B_T_H_W_C.shape
+        B_prior, T, H, W, C = x_B_T_H_W_C.shape
+        B_T_H_W_C = (1, T, H, W, C)
         if self.cp_group is not None:
             cp_ranks = get_process_group_ranks(self.cp_group)
             cp_size = len(cp_ranks)
             B, T, H, W, C = B_T_H_W_C
             B_T_H_W_C = (B, T * cp_size, H, W, C)
-        embeddings = self.generate_embeddings(B_T_H_W_C, fps=fps)
+
+        # if fps values are all the same, generate directly
+        if fps is not None and torch.all(fps == fps[0]):
+            if B_prior > 1:
+                fps = fps[0]
+            embeddings = self.generate_embeddings(B_T_H_W_C, fps=fps)
+        else:
+            raise NotImplementedError("cannot produce positional embeddings with BS>1 and variable FPS")
 
         if self.cp_group is not None:
             if isinstance(self, VideoRopePosition3DEmb):
@@ -1260,12 +1268,13 @@ class DiTCrossAttentionExtendModel7B(VisionModule):
         self, x_B_C_T_H_W: torch.Tensor, fps: Optional[torch.Tensor] = None, padding_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         if self.concat_padding_mask:
-            padding_mask = padding_mask.squeeze(0)
+            padding_mask_bct = padding_mask.shape[:3] # B, 1, 1, H, W
+            padding_mask = padding_mask.flatten(0, 1)
             padding_mask = transforms.functional.resize(
                 padding_mask, list(x_B_C_T_H_W.shape[-2:]), interpolation=transforms.InterpolationMode.NEAREST
-            )
+            ).reshape(list(padding_mask_bct) + list(x_B_C_T_H_W.shape[-2:]))
             x_B_C_T_H_W = torch.cat(
-                [x_B_C_T_H_W, padding_mask.unsqueeze(1).repeat(1, 1, x_B_C_T_H_W.shape[2], 1, 1)], dim=1
+                [x_B_C_T_H_W, padding_mask.repeat(1, 1, x_B_C_T_H_W.shape[2], 1, 1)], dim=1
             )
         x_B_T_H_W_D = self.x_embedder(x_B_C_T_H_W)
         if self.extra_per_block_abs_pos_emb:
