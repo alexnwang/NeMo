@@ -488,112 +488,84 @@ class DiTModel(GPTModel):
             
         del batch['timesteps']  # HACK make sure this isn't used anywhere
         
-        if self._validation_step_count % 4 == 0:
+        B = batch['video'].shape[0]
+        SAVE_FREQ=8
+        
+        if B > SAVE_FREQ:
+            indices_to_save = list(range(self._validation_step_count * B % SAVE_FREQ, B, SAVE_FREQ))
+        elif B == SAVE_FREQ: 
+            indices_to_save = [0]
+        else:
+            indices_to_save = [i for i in range(B) if (self._validation_step_count * B + i) % SAVE_FREQ == 0]
+        
+        for idx in indices_to_save:
+            sample_batch = {k: v[idx: idx+1] for k, v in batch.items() if k not in ["is_preprocessed"]}
+            sample_batch['is_preprocessed'] = batch['is_preprocessed'] # hack to make sure the batch is preprocessed
+            
             # In mcore the loss-function is part of the forward-pass (when labels are provided)
-            state_shape = batch['video'].shape
-            try:
-                import traceback
+            state_shape = sample_batch['video'].shape
+            
+            # iterate, with and without text conditioning
+            for guidance in [1, 7]:
                 sample = self.diffusion_pipeline.generate_samples_from_batch(
-                batch,
-                guidance=7,
-                state_shape=state_shape,
-                num_steps=35,
-                is_negative_prompt=True if 'neg_t5_text_embeddings' in batch else False,
-                seed=1,
-                condition_latent=batch['gt_latent'],
-                num_condition_t=1,
-                condition_video_augment_sigma_in_inference=0.001
+                    sample_batch,
+                    guidance=guidance,
+                    state_shape=state_shape,
+                    num_steps=35,
+                    is_negative_prompt=True if 'neg_t5_text_embeddings' in sample_batch else False,
+                    seed=1,
+                    condition_latent=sample_batch['gt_latent'],
+                    num_condition_t=1,
+                    condition_video_augment_sigma_in_inference=0.001
                 )
-            except Exception as e:
-                print("An error occurred during sample generation:")
-                traceback.print_exc()
-                raise e
-            
-            b,c,t,h,w = state_shape
-            # HACK for padding up to T=16, however, not necessary it seems
-            # vae_length = 16
-            # if t < vae_length:
-            #     # pad sample to the same length as the vae
-            #     sample = torch.cat([
-            #         sample,torch.zeros(b, c, vae_length-t, h, w, dtype=sample.dtype, device=sample.device)
-            #     ], dim=2)
-            
-            video = (1.0 + self.vae.decode(sample / self.config.sigma_data)).clamp(0, 2) / 2  # [B, 3, T, H, W]
-            video = video[:, :, :int(batch['num_frames'][0, 0])]
-            # video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
-            
-            # Save the video using torchvision
-            from cosmos1.utils.io import save_video
+                
+                b,c,t,h,w = state_shape
+                # HACK for padding up to T=16, however, not necessary it seems
+                # vae_length = 16
+                # if t < vae_length:
+                #     # pad sample to the same length as the vae
+                #     sample = torch.cat([
+                #         sample,torch.zeros(b, c, vae_length-t, h, w, dtype=sample.dtype, device=sample.device)
+                #     ], dim=2)
+                
+                video = (1.0 + self.vae.decode(sample / self.config.sigma_data)).clamp(0, 2) / 2  # [B, 3, T, H, W]
+                video = video[:, :, :int(sample_batch['num_frames'][0, 0])]
+                # video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
+                
+                # Save the video using torchvision
+                from cosmos1.utils.io import save_video
 
-            video_tensor = torch.tensor(video)[0].permute(1, 2, 3, 0)  # Convert to (THWC) format
-            video_np = (video_tensor * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
-            if 'narration' in batch:
-                save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-{batch['narration'][0]}.mp4"
-            else:
-                save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}.mp4",
-            if torch.distributed.get_rank() == 0:
-                save_video(
-                    video=video_np,
-                    fps=int(batch['fps'][0, 0]),
-                    H=int(batch['image_size'][0, 0, 0]),
-                    W=int(batch['image_size'][0, 0, 1]),
-                    video_save_quality=5,
-                    video_save_path=save_video_fpath
-                )
+                video_tensor = torch.tensor(video)[0].permute(1, 2, 3, 0)  # Convert to (THWC) format
+                video_np = (video_tensor * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
+                
+                if app_state.data_parallel_size > 1:
+                    rank_str = f"-rank{app_state.data_parallel_rank}"
+                else:
+                    rank_str = ""
+                    
+                if 'narration' in sample_batch:
+                    save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-cfg{guidance}{rank_str}-{sample_batch['narration'][0]}.mp4"
+                else:
+                    save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-cfg{guidance}{rank_str}.mp4",
+                    
+                if app_state._tensor_model_parallel_rank == 0:
+                    save_video(
+                        video=video_np,
+                        fps=int(sample_batch['fps'][0, 0]),
+                        H=int(sample_batch['image_size'][0, 0, 0]),
+                        W=int(sample_batch['image_size'][0, 0, 1]),
+                        video_save_quality=5,
+                        video_save_path=save_video_fpath
+                    )
         self._validation_step_count += 1
 
-        # # TODO visualize more than 1 sample
-        # sample = sample[0, None]
-        # C, T, H, W = batch['latent_shape'][0]
-        # seq_len_q = batch['seq_len_q'][0]
-
-        # sample = rearrange(
-        #     sample[:, :seq_len_q],
-        #     'B (T H W) (ph pw pt C) -> B C (T pt) (H ph) (W pw)',
-        #     ph=self.config.patch_spatial,
-        #     pw=self.config.patch_spatial,
-        #     C=C,
-        #     T=T,
-        #     H=H // self.config.patch_spatial,
-        #     W=W // self.config.patch_spatial,
-        # )
-
-        # video = (1.0 + self.vae.decode(sample / self.config.sigma_data)).clamp(0, 2) / 2  # [B, 3, T, H, W]
-
-        # video = (video * 255).to(torch.uint8).cpu().numpy().astype(np.uint8)
-
-        # T = video.shape[2]
-        # if T == 1:
-        #     image = rearrange(video, 'b c t h w -> (b t h) w c')
-        #     result = image
-        # else:
-        #     # result = wandb.Video(video, fps=float(batch['fps'])) # (batch, time, channel, height width)
-        #     result = video
-
-        # # wandb is on the last rank for megatron, first rank for nemo
-        # wandb_rank = 0
-
-        # if parallel_state.get_data_parallel_src_rank() == wandb_rank:
-        #     if torch.distributed.get_rank() == wandb_rank:
-        #         gather_list = [None for _ in range(parallel_state.get_data_parallel_world_size())]
-        #     else:
-        #         gather_list = None
-        #     torch.distributed.gather_object(
-        #         result, gather_list, wandb_rank, group=parallel_state.get_data_parallel_group()
-        #     )
-        #     if gather_list is not None:
-        #         videos = []
-        #         for video in gather_list:
-        #             if len(video.shape) == 3:
-        #                 videos.append(wandb.Image(video))
-        #             else:
-        #                 videos.append(wandb.Video(video, fps=30))
-        #         wandb.log({'prediction': videos}, step=self.global_step)
-
         # compute the loss of a training step for 10 validation steps to evaluate loss
-        
         loss = self.diffusion_pipeline.validation_step(batch, num_steps=15)
+        uncondition_loss = self.diffusion_pipeline.validation_step(batch, num_steps=15, text_conditioning=False)
+        
+        self.log('unconditioned_validation_loss', uncondition_loss.mean())
         self.log('validation_loss', loss.mean())
+        # self.log('val_loss', loss.mean(), prog_bar=False, on_epoch=True)
         return {"val_loss": loss}
 
     @property
