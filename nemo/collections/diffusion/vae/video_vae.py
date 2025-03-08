@@ -204,18 +204,20 @@ class BasePretrainedVideoTokenizer(ABC):
     def get_latent_num_frames(self, num_pixel_frames: int) -> int:
         if num_pixel_frames == 1:
             return 1
-        assert (
-            num_pixel_frames % self.pixel_chunk_duration == 0
-        ), f"Temporal dimension {num_pixel_frames} is not divisible by chunk_length {self.pixel_chunk_duration}"
-        return num_pixel_frames // self.pixel_chunk_duration * self.latent_chunk_duration
+        # assert (
+        #     num_pixel_frames % self.pixel_chunk_duration == 0
+        # ), f"Temporal dimension {num_pixel_frames} is not divisible by chunk_length {self.pixel_chunk_duration}"
+        return (num_pixel_frames - 1) // self.temporal_compression_factor + 1
+        # return num_pixel_frames // self.pixel_chunk_duration * self.latent_chunk_duration
 
     def get_pixel_num_frames(self, num_latent_frames: int) -> int:
         if num_latent_frames == 1:
             return 1
-        assert (
-            num_latent_frames % self.latent_chunk_duration == 0
-        ), f"Temporal dimension {num_latent_frames} is not divisible by chunk_length {self.latent_chunk_duration}"
-        return num_latent_frames // self.latent_chunk_duration * self.pixel_chunk_duration
+        # assert (
+        #     num_latent_frames % self.latent_chunk_duration == 0
+        # ), f"Temporal dimension {num_latent_frames} is not divisible by chunk_length {self.latent_chunk_duration}"
+        return (num_latent_frames - 1) * self.temporal_compression_factor + 1
+        # return num_latent_frames // self.latent_chunk_duration * self.pixel_chunk_duration
 
 
 class VideoJITTokenizer(BasePretrainedVideoTokenizer, JITVAE, VideoTokenizerInterface):
