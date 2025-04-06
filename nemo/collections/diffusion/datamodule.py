@@ -67,10 +67,16 @@ class VideoFolderDataset(Dataset):
             info = json.load(f)
         
         # Load text embeddings
-        text_embedding = torch.load(os.path.join(self.root_dir, f"{prefix}.t5_text_embeddings.pth"))
+        if os.path.exists(os.path.join(self.root_dir, f"{prefix}.upsampled_t5_text_embeddings.pth")):
+            text_embedding = torch.load(os.path.join(self.root_dir, f"{prefix}.upsampled_t5_text_embeddings.pth"))
+        else:
+            text_embedding = torch.load(os.path.join(self.root_dir, f"{prefix}.t5_text_embeddings.pth"))
         
         # Load text mask
-        text_mask = torch.load(os.path.join(self.root_dir, f"{prefix}.t5_text_mask.pth"))
+        if os.path.exists(os.path.join(self.root_dir, f"{prefix}.upsampled_t5_text_mask.pth")):
+            text_mask = torch.load(os.path.join(self.root_dir, f"{prefix}.upsampled_t5_text_mask.pth"))
+        else:
+            text_mask = torch.load(os.path.join(self.root_dir, f"{prefix}.t5_text_mask.pth"))
         
         # Load video latent
         video_latent = torch.load(os.path.join(self.root_dir, f"{prefix}.video_latent.pth"))
@@ -108,7 +114,9 @@ class VideoFolderDataset(Dataset):
             "num_condition_t": random.randint(1, 1)
         }
         
-        if 'narration' in info:
+        if 'upsampled_prompt' in info:
+            sample['narration'] = info['upsampled_prompt']
+        elif 'narration' in info:
             sample['narration'] = info['narration']
         # if self._cache is not None:
         #     self._cache[idx] = sample
