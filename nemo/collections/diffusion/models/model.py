@@ -488,15 +488,12 @@ class DiTModel(GPTModel):
             
         del batch['timesteps']  # HACK make sure this isn't used anywhere
         
-        B = batch['video'].shape[0]
-        SAVE_FREQ=8
+        print(f"GPU Rank: {torch.distributed.get_rank()}, Data Parallel Size: {app_state.data_parallel_size}, Data Parallel Group: {app_state.data_parallel_group}, Data Parallel Rank: {app_state.data_parallel_rank}")
         
-        if B > SAVE_FREQ:
-            indices_to_save = list(range(self._validation_step_count * B % SAVE_FREQ, B, SAVE_FREQ))
-        elif B == SAVE_FREQ: 
-            indices_to_save = [0]
-        else:
-            indices_to_save = [i for i in range(B) if (self._validation_step_count * B + i) % SAVE_FREQ == 0]
+        B = batch['video'].shape[0]
+        
+        example_count = [x + (self._validation_step_count * app_state.data_parallel_size + app_state.data_parallel_rank) * B for x in range(B)]
+        indices_to_save = [index for index, count in zip(range(B), example_count) if count % 4 == 0]
         
         for idx in indices_to_save:
             sample_batch = {k: v[idx: idx+1] for k, v in batch.items() if k not in ["is_preprocessed"]}
@@ -564,13 +561,13 @@ class DiTModel(GPTModel):
         self._validation_step_count += 1
 
         # compute the loss of a training step for 10 validation steps to evaluate loss
-        loss = self.diffusion_pipeline.validation_step(batch, num_steps=15)
-        # uncondition_loss = self.diffusion_pipeline.validation_step(batch, num_steps=15, text_conditioning=False)
+        loss = self.diffusion_pipeline.validation_step(batch, num_steps=None)
+        uncondition_loss = self.diffusion_pipeline.validation_step(batch, num_steps=None, text_conditioning=False)
         
-        # self.log('unconditioned_validation_loss', uncondition_loss.mean())
-        self.log('validation_loss', loss.mean(), prog_bar=True, on_epoch=True)
-        # self.log('val_loss', loss.mean(), prog_bar=False, on_epoch=True)
-        return {"val_loss": loss}
+        self.log('unconditioned_validation_loss', uncondition_loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
+        self.log('validation_loss', loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
+        self.log('val_loss', loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
+        return {}
 
     @property
     def training_loss_reduction(self) -> MaskedTokenLossReduction:
