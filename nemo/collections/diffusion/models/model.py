@@ -506,7 +506,7 @@ class DiTModel(GPTModel):
             state_shape = sample_batch['video'].shape
             
             # iterate, with and without text conditioning
-            for guidance in [1, 7]:
+            for guidance in [7]:
                 sample = self.diffusion_pipeline.generate_samples_from_batch(
                     sample_batch,
                     guidance=guidance,
@@ -543,12 +543,11 @@ class DiTModel(GPTModel):
                 else:
                     rank_str = ""
                     
-                if 'narration' in sample_batch:
-                    save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-cfg{guidance}{rank_str}-{sample_batch['narration'][0]}.mp4"
-                else:
-                    save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-cfg{guidance}{rank_str}.mp4",
+                # TODO setup the save name based on idx as well
+                save_video_fpath = f"{video_save_dir}/{self.global_step}-{self._validation_step_count}-{rank_str}-idx{idx}-cfg{guidance}.mp4"
                     
                 if app_state._tensor_model_parallel_rank == 0:
+                    print(f"{torch.distributed.get_rank()} Saving video to {save_video_fpath}")
                     save_video(
                         video=video_np,
                         fps=int(sample_batch['fps'][0, 0]),
@@ -557,14 +556,19 @@ class DiTModel(GPTModel):
                         video_save_quality=5,
                         video_save_path=save_video_fpath
                     )
+                    # Save narration to a file
+                    if 'narration' in sample_batch:
+                        narration_save_path = save_video_fpath.replace('.mp4', '.txt')
+                        with open(narration_save_path, 'w') as narration_file:
+                            narration_file.write(sample_batch['narration'][0])
         self._validation_step_count += 1
 
         # compute the loss of a training step for 10 validation steps to evaluate loss
         loss = self.diffusion_pipeline.validation_step(batch, num_steps=15)
-        uncondition_loss = self.diffusion_pipeline.validation_step(batch, num_steps=15, text_conditioning=False)
+        # uncondition_loss = self.diffusion_pipeline.validation_step(batch, num_steps=15, text_conditioning=False)
         
-        self.log('unconditioned_validation_loss', uncondition_loss.mean())
-        self.log('validation_loss', loss.mean())
+        # self.log('unconditioned_validation_loss', uncondition_loss.mean())
+        self.log('validation_loss', loss.mean(), prog_bar=True, on_epoch=True)
         # self.log('val_loss', loss.mean(), prog_bar=False, on_epoch=True)
         return {"val_loss": loss}
 
