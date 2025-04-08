@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from statistics import NormalDist
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Optional
 
 import numpy as np
 import torch
@@ -46,8 +46,11 @@ class EDMSDE:
         self.sigma_min = sigma_min
         self._generator = np.random
 
-    def sample_t(self, batch_size: int) -> torch.Tensor:
-        cdf_vals = self._generator.uniform(size=(batch_size))
+    def sample_t(self, batch_size: int, generator: torch.Generator = None) -> torch.Tensor:
+        if generator is not None:
+            cdf_vals = torch.rand(batch_size, generator=generator, device=generator.device).cpu().numpy()
+        else:
+            cdf_vals = self._generator.uniform(size=(batch_size))
         samples_interval_gaussian = [self.gaussian_dist.inv_cdf(cdf_val) for cdf_val in cdf_vals]
         log_sigma = torch.tensor(samples_interval_gaussian, device="cuda")
         return torch.exp(log_sigma)

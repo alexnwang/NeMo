@@ -493,7 +493,7 @@ class DiTModel(GPTModel):
         B = batch['video'].shape[0]
         
         example_count = [x + (self._validation_step_count * app_state.data_parallel_size + app_state.data_parallel_rank) * B for x in range(B)]
-        indices_to_save = [index for index, count in zip(range(B), example_count) if count % 4 == 0]
+        indices_to_save = [index for index, count in zip(range(B), example_count) if count % 8 == 0]
         
         for idx in indices_to_save:
             sample_batch = {k: v[idx: idx+1] for k, v in batch.items() if k not in ["is_preprocessed"]}
@@ -566,7 +566,7 @@ class DiTModel(GPTModel):
         
         self.log('unconditioned_validation_loss', uncondition_loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
         self.log('validation_loss', loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
-        self.log('val_loss', loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
+        # self.log('val_loss', loss.mean(), prog_bar=False, on_epoch=True, sync_dist=True)
         return {}
 
     @property

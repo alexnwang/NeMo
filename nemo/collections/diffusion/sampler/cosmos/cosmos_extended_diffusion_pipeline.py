@@ -158,7 +158,10 @@ class ExtendedDiffusionPipeline:
         return output_batch, kendall_loss
 
     def validation_step(
-        self, data_batch: dict[str, torch.Tensor], num_steps: Optional[int] = None, text_conditioning: bool = True,
+        self,
+        data_batch: dict[str, torch.Tensor],
+        num_steps: Optional[int] = None,
+        text_conditioning: bool = True,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         x0_from_data_batch, x0, condition = self.get_data_and_condition(data_batch)
             
@@ -173,7 +176,9 @@ class ExtendedDiffusionPipeline:
         if num_steps is None:
             condition.apply_corruption_to_condition_region = "noise_with_sigma_fixed"
             
-            sigma, epsilon = self.draw_training_sigma_and_epsilon(x0.size(), condition)
+            generator = torch.Generator(device='cuda').manual_seed(self.seed) # so that the noise is the same on each run
+            sigma, epsilon = self.draw_training_sigma_and_epsilon(x0.size(), condition, generator=generator)
+            
             output_batch, kendall_loss, pred_mse, edm_loss = self.compute_loss_with_epsilon_and_sigma(
                 data_batch, x0_from_data_batch, x0, condition, epsilon, sigma
             )
@@ -564,14 +569,21 @@ class ExtendedDiffusionPipeline:
                 data_batch[input_key] = rearrange(data_batch[input_key], "b c h w -> b c 1 h w").contiguous()
                 data_batch[IS_PREPROCESSED_KEY] = True
 
-    def draw_training_sigma_and_epsilon(self, x0_size: int, condition: Any) -> torch.Tensor:
+    def draw_training_sigma_and_epsilon(self, x0_size: int, condition: Any, generator: Any = None) -> torch.Tensor:
         del condition
         batch_size = x0_size[0]
-        if self._noise_generator is None:
-            self._initialize_generators()
-        epsilon = torch.randn(x0_size, **self.tensor_kwargs, generator=self._noise_generator)
+        if generator is None:
+            if self._noise_generator is None:
+                self._initialize_generators()
+            generator_ = self._noise_generator
+        else:
+            generator_ = generator
+        epsilon = torch.randn(x0_size, **self.tensor_kwargs, generator=generator_)
         self.video_noise_multiplier = 1.0
-        sigma_B = self.sde.sample_t(batch_size) * self.video_noise_multiplier
+        
+        # HACK, because if we are specifying generator, we would also like to fix sigma and it is ignored if it is None
+        sigma_B = self.sde.sample_t(batch_size, generator=generator) * self.video_noise_multiplier
+
         return sigma_B.to(**self.tensor_kwargs), epsilon
 
     def draw_augment_sigma_and_epsilon(
